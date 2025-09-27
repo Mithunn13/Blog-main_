@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 
 const AppContext = createContext();
 
-// Create a persistent, default instance once
+// 1. DEFINE BASE URL CORRECTLY (Works locally AND in Vercel)
 const defaultAxios = axios.create({
     baseURL: import.meta.env.VITE_BASE_URL || "http://localhost:3000",
 });
@@ -16,13 +16,10 @@ export const AppProvider = ({ children }) => {
     const [blogs, setBlogs] = useState([]);
     const [input, setInput] = useState('');
 
-    // 🚀 FIX: Use useMemo to set up the interceptor for the privateAxios instance
-    // The instance itself is defined outside the component for stability.
+    // Private Axios instance with token interceptor
     const privateAxios = useMemo(() => {
-        // Create a *new* instance based on the default one to use for private calls
         const instance = defaultAxios.create();
         
-        // Use an interceptor to inject the token into the headers before any request is sent
         instance.interceptors.request.use(
             (config) => {
                 const currentToken = localStorage.getItem('token');
@@ -36,12 +33,10 @@ export const AppProvider = ({ children }) => {
             }
         );
 
-        // Optional: Interceptor for response errors (e.g., auto-logout on 401)
         instance.interceptors.response.use(
             (response) => response,
             (error) => {
                 if (error.response && error.response.status === 401) {
-                    // Handle 401 errors: logout the user
                     localStorage.removeItem('token');
                     setToken(null);
                     toast.error("Session expired or unauthorized. Please log in again.");
@@ -52,12 +47,14 @@ export const AppProvider = ({ children }) => {
         );
         
         return instance;
-    }, [navigate, setToken]); // Depend only on functions/variables that change the behavior (e.g., navigate)
+    }, [navigate, setToken]);
 
+    // 2. FIX APPLIED: Use defaultAxios for public routes (e.g., fetching all blogs)
     const fetchBlogs = useCallback(async () => {
         try {
-            // Using plain axios for public routes
-            const { data } = await axios.get('/api/blog/all');
+            // FIX: This now uses the defaultAxios instance with the correct baseURL 
+            const { data } = await defaultAxios.get('/api/blog/all'); 
+            
             if (data.success) {
                 setBlogs(data.blogs);
             } else {
@@ -66,11 +63,11 @@ export const AppProvider = ({ children }) => {
         } catch (error) {
             toast.error(error.response?.data?.message || error.message);
         }
-    }, []);
+    }, []); // Removed defaultAxios from deps as it's stable
 
     const fetchAdminBlogs = useCallback(async () => {
         try {
-            // Using the robust privateAxios instance
+            // This correctly uses the privateAxios instance
             const { data } = await privateAxios.get('/api/admin/blogs');
             if (data.success) {
                 setBlogs(data.blogs);
@@ -78,7 +75,6 @@ export const AppProvider = ({ children }) => {
                 toast.error(data.message);
             }
         } catch (error) {
-            // The response interceptor above will handle 401 errors
             toast.error(error.response?.data?.message || error.message);
         }
     }, [privateAxios]);
@@ -90,7 +86,7 @@ export const AppProvider = ({ children }) => {
     }, [fetchBlogs]);
 
     const value = {
-        axios: defaultAxios, // Providing a stable default instance
+        axios: defaultAxios, // Provided for unauthenticated calls outside the context
         navigate,
         token,
         setToken,
